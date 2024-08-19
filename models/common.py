@@ -383,6 +383,53 @@ class SPPFCSPC(nn.Module):
         y2 = self.cv2(x)
         return self.cv7(torch.cat((y1, y2), dim=1))
 
+class SimConv(nn.Module):
+    """Normal Conv with ReLU activation"""
+
+    def __init__(
+        self, in_channels, out_channels, kernel_size, stride, groups=1, bias=False
+    ):
+        super().__init__()
+        padding = kernel_size // 2
+        self.conv = nn.Conv2d(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            groups=groups,
+            bias=bias,
+        )
+        self.bn = nn.BatchNorm2d(out_channels)
+        self.act = nn.LeakyReLU()
+
+    def forward(self, x):
+        return self.act(self.bn(self.conv(x)))
+
+    def forward_fuse(self, x):
+        return self.act(self.conv(x))
+
+
+class SimSPPFCSPC(nn.Module):
+    def __init__(self, c1, c2, n=1, shortcut=False, g=4, e=0.5, k=5):
+        super(SimSPPFCSPC, self).__init__()
+        c_ = int(2 * c2 * e)  # hidden channels
+        self.cv1 = SimConv(c1, c_, 1, 1, g)
+        self.cv2 = SimConv(c1, c_, 1, 1, g)
+        self.cv3 = SimConv(c_, c_, 3, 1, g)
+        self.cv4 = SimConv(c_, c_, 1, 1, g)
+        self.m = nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2)
+        self.cv5 = SimConv(4 * c_, c_, 1, 1, g)
+        self.cv6 = SimConv(c_, c_, 3, 1, g)
+        self.cv7 = SimConv(2 * c_, c2, 1, 1, g)
+
+    def forward(self, x):
+        x1 = self.cv4(self.cv3(self.cv1(x)))
+        x2 = self.m(x1)
+        x3 = self.m(x2)
+        y1 = self.cv6(self.cv5(torch.cat((x1, x2, x3, self.m(x3)), 1)))
+        y2 = self.cv2(x)
+        return self.cv7(torch.cat((y1, y2), dim=1))
 
 class GhostStem(Stem):
     # Stem
